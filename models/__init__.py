@@ -11,7 +11,8 @@ from . import hr_employee
 from . import res_config_settings
 from . import zkteco_device_event_logs
 from . import device_stamp_logs
-from . import hr_employee
+# from . import hr_employee
+from . import employee_leave_line
 from . import zkteco_device_states
 from . import zkteco_user_fingerprints
 from . import zkteco_cmds
