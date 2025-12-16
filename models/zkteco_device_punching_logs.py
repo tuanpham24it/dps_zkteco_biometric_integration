@@ -52,7 +52,12 @@ class ZktecoDeviceLogs(models.Model):
         store=True
     )
 
-    employee_code = fields.Char(string='Employee Code')
+    # Customized by Tunn
+    employee_code = fields.Char(
+        string='Employee Code',
+        related='zketco_duser_id.employee_id.x_studio_m_nhn_vin',
+        help="Code of the employee fetched from the linked employee record."
+    )
     employee_department = fields.Char(
         related='zketco_duser_id.employee_id.department_id.name',
         string='Department'
