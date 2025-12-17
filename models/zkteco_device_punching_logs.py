@@ -15,92 +15,6 @@ from convertdate import islamic
 # ZKTeco Device Logs
 # ======================================================
 
-class ZktecoDeviceLogs(models.Model):
-    _name = 'zkteco.device.logs'
-    _description = 'ZKTeco Device Logs'
-    _order = 'user_punch_time desc'
-    _rec_name = 'user_punch_time'
-
-    status = fields.Selection(
-        [('0', 'Check In'), ('1', 'Check Out'), ('2', 'Ignored')],
-        string='Status',
-        readonly=True
-    )
-
-    status_number = fields.Char(string="Raw Status")  # IN / OUT from device
-    user_punch_time = fields.Datetime(required=True)
-    device = fields.Char()
-    user_punch_calculated = fields.Boolean(default=False)
-
-    zketco_duser_id = fields.Many2one('zkteco.attendance.machine')
-    employee_id = fields.Many2one(
-        'hr.employee',
-        related='zketco_duser_id.employee_id',
-        store=True
-    )
-
-    company_id = fields.Many2one(
-        'res.company',
-        default=lambda self: self.env.company,
-        readonly=True
-    )
-
-    # --------------------------------------------------
-    # CREATE – SAFE, NO 422
-    # --------------------------------------------------
-
-    @api.model_create_multi
-    def create(self, vals_list):
-        records = super().create(vals_list)
-        Attendance = self.env['hr.attendance']
-
-        for log in records:
-            if not log.employee_id or not log.user_punch_time:
-                continue
-
-            last_att = Attendance.search([
-                ('employee_id', '=', log.employee_id.id)
-            ], order='check_in desc', limit=1)
-
-            # ===== CASE 1: CHECK IN =====
-            if log.status_number == '0':
-                if last_att and not last_att.check_out:
-                    # Attendance treo quá 16h → auto close
-                    if log.user_punch_time - last_att.check_in > timedelta(hours=16):
-                        last_att.write({
-                            'check_out': last_att.check_in + timedelta(hours=8)
-                        })
-                    else:
-                        log.status = '2'
-                        continue
-
-                Attendance.create({
-                    'employee_id': log.employee_id.id,
-                    'check_in': log.user_punch_time,
-                })
-                log.status = '0'
-
-            # ===== CASE 2: CHECK OUT =====
-            elif log.status_number == '1':
-                if last_att and not last_att.check_out:
-                    if log.user_punch_time > last_att.check_in:
-                        last_att.write({'check_out': log.user_punch_time})
-                        log.status = '1'
-                else:
-                    log.status = '2'
-
-            else:
-                log.status = '2'
-
-        return records
-
-    # --------------------------------------------------
-
-    def unlink(self):
-        if self.filtered('user_punch_calculated'):
-            raise UserError(_("Cannot delete processed logs"))
-        return super().unlink()
-
 # class ZktecoDeviceLogs(models.Model):
 #     _name = 'zkteco.device.logs'
 #     _description = 'ZKTeco Device Logs'
@@ -108,125 +22,230 @@ class ZktecoDeviceLogs(models.Model):
 #     _rec_name = 'user_punch_time'
 
 #     status = fields.Selection(
-#         [
-#             ('0', 'Check In'),
-#             ('1', 'Check Out'),
-#             ('2', 'Punched')
-#         ],
-#         string='Status'
-#     )
-
-#     user_punch_time = fields.Datetime(string='Punching Time')
-#     user_punch_calculated = fields.Boolean(string='Punch Calculated', default=False)
-#     device = fields.Char(string='Device')
-
-#     company_id = fields.Many2one(
-#         'res.company',
-#         string='Company',
-#         default=lambda self: self.env.company,
+#         [('0', 'Check In'), ('1', 'Check Out'), ('2', 'Ignored')],
+#         string='Status',
 #         readonly=True
 #     )
 
-#     zketco_duser_id = fields.Many2one(
-#         'zkteco.attendance.machine',
-#         string="Device User"
-#     )
+#     status_number = fields.Char(string="Raw Status")  # IN / OUT from device
+#     user_punch_time = fields.Datetime(required=True)
+#     device = fields.Char()
+#     user_punch_calculated = fields.Boolean(default=False)
 
+#     zketco_duser_id = fields.Many2one('zkteco.attendance.machine')
 #     employee_id = fields.Many2one(
 #         'hr.employee',
 #         related='zketco_duser_id.employee_id',
 #         store=True
 #     )
 
-#     # Customized by Tunn
-#     employee_code = fields.Char(
-#         string='Employee Code',
-#         related='zketco_duser_id.employee_id.x_studio_m_nhn_vin',
-#         help="Code of the employee fetched from the linked employee record."
+#     company_id = fields.Many2one(
+#         'res.company',
+#         default=lambda self: self.env.company,
+#         readonly=True
 #     )
-#     employee_department = fields.Char(
-#         related='zketco_duser_id.employee_id.department_id.name',
-#         string='Department'
-#     )
-#     employee_name = fields.Char(
-#         related='zketco_duser_id.employee_id.name',
-#         string='Employee Name'
-#     )
-
-#     weekday_name = fields.Char(
-#         string="Weekday",
-#         compute="_compute_weekday_name",
-#         store=True
-#     )
-
-#     status_number = fields.Char(string="Status Number")
-#     number = fields.Char(string="Number")
-#     timestamp = fields.Integer(string="Timestamp")
-#     punch_status_in_string = fields.Char(string="Status String")
 
 #     # --------------------------------------------------
-#     # CREATE (ODOO 19 SAFE)
+#     # CREATE – SAFE, NO 422
 #     # --------------------------------------------------
 
 #     @api.model_create_multi
 #     def create(self, vals_list):
 #         records = super().create(vals_list)
+#         Attendance = self.env['hr.attendance']
 
-#         hr_attendance = self.env['hr.attendance']
-
-#         for record in records:
-#             employee = record.employee_id
-#             punch_time = record.user_punch_time
-
-#             if not employee or not punch_time:
+#         for log in records:
+#             if not log.employee_id or not log.user_punch_time:
 #                 continue
 
-#             last_attendance = hr_attendance.search(
-#                 [('employee_id', '=', employee.id)],
-#                 order='check_in desc',
-#                 limit=1
-#             )
+#             last_att = Attendance.search([
+#                 ('employee_id', '=', log.employee_id.id)
+#             ], order='check_in desc', limit=1)
 
-#             if not last_attendance or last_attendance.check_out:
-#                 hr_attendance.create({
-#                     'employee_id': employee.id,
-#                     'check_in': punch_time,
+#             # ===== CASE 1: CHECK IN =====
+#             if log.status_number == '0':
+#                 if last_att and not last_att.check_out:
+#                     # Attendance treo quá 16h → auto close
+#                     if log.user_punch_time - last_att.check_in > timedelta(hours=16):
+#                         last_att.write({
+#                             'check_out': last_att.check_in + timedelta(hours=8)
+#                         })
+#                     else:
+#                         log.status = '2'
+#                         continue
+
+#                 Attendance.create({
+#                     'employee_id': log.employee_id.id,
+#                     'check_in': log.user_punch_time,
 #                 })
-#                 record.status = '0'  # Check In
-#             else:
-#                 if punch_time > last_attendance.check_in:
-#                     last_attendance.write({'check_out': punch_time})
-#                     record.status = '1'  # Check Out
+#                 log.status = '0'
+
+#             # ===== CASE 2: CHECK OUT =====
+#             elif log.status_number == '1':
+#                 if last_att and not last_att.check_out:
+#                     if log.user_punch_time > last_att.check_in:
+#                         last_att.write({'check_out': log.user_punch_time})
+#                         log.status = '1'
 #                 else:
-#                     record.status = '2'  # Old punch
+#                     log.status = '2'
+
+#             else:
+#                 log.status = '2'
 
 #         return records
 
 #     # --------------------------------------------------
-#     # UNLINK PROTECTION
-#     # --------------------------------------------------
 
 #     def unlink(self):
-#         processed = self.filtered(lambda r: r.user_punch_calculated)
-#         if processed:
-#             raise UserError(_("You cannot delete processed attendance logs."))
+#         if self.filtered('user_punch_calculated'):
+#             raise UserError(_("Cannot delete processed logs"))
 #         return super().unlink()
 
-#     # --------------------------------------------------
-#     # COMPUTE WEEKDAY
-#     # --------------------------------------------------
+class ZktecoDeviceLogs(models.Model):
+    _name = 'zkteco.device.logs'
+    _description = 'ZKTeco Device Logs'
+    _order = 'user_punch_time desc'
+    _rec_name = 'user_punch_time'
 
-#     @api.depends('user_punch_time')
-#     def _compute_weekday_name(self):
-#         weekdays = [
-#             "Thứ Hai", "Thứ Ba", "Thứ Tư",
-#             "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"
-#         ]
-#         for rec in self:
-#             rec.weekday_name = (
-#                 weekdays[rec.user_punch_time.weekday()]
-#                 if rec.user_punch_time else False
-#             )
+    status = fields.Selection(
+        [
+            ('0', 'Check In'),
+            ('1', 'Check Out'),
+            ('2', 'Punched')
+        ],
+        string='Status'
+    )
+
+    user_punch_time = fields.Datetime(string='Punching Time')
+    user_punch_calculated = fields.Boolean(string='Punch Calculated', default=False)
+    device = fields.Char(string='Device')
+
+    company_id = fields.Many2one(
+        'res.company',
+        string='Company',
+        default=lambda self: self.env.company,
+        readonly=True
+    )
+
+    zketco_duser_id = fields.Many2one(
+        'zkteco.attendance.machine',
+        string="Device User"
+    )
+
+    employee_id = fields.Many2one(
+        'hr.employee',
+        related='zketco_duser_id.employee_id',
+        store=True
+    )
+
+    # Customized by Tunn
+    employee_code = fields.Char(
+        string='Employee Code',
+        related='zketco_duser_id.employee_id.x_studio_m_nhn_vin',
+        help="Code of the employee fetched from the linked employee record."
+    )
+    employee_department = fields.Char(
+        related='zketco_duser_id.employee_id.department_id.name',
+        string='Department'
+    )
+    employee_name = fields.Char(
+        related='zketco_duser_id.employee_id.name',
+        string='Employee Name'
+    )
+
+    weekday_name = fields.Char(
+        string="Weekday",
+        compute="_compute_weekday_name",
+        store=True
+    )
+
+    status_number = fields.Char(string="Status Number")
+    number = fields.Char(string="Number")
+    timestamp = fields.Integer(string="Timestamp")
+    punch_status_in_string = fields.Char(string="Status String")
+
+    # --------------------------------------------------
+    # CREATE (ODOO 19 SAFE)
+    # --------------------------------------------------
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        Attendance = self.env['hr.attendance']
+
+        for record in records:
+            employee = record.employee_id
+            punch_time = record.user_punch_time
+
+            if not employee or not punch_time:
+                continue
+
+            last_attendance = Attendance.search(
+                [('employee_id', '=', employee.id)],
+                order='check_in desc',
+                limit=1
+            )
+
+            # ===== CHECK IN =====
+            if record.status_number == '0':
+                if last_attendance and not last_attendance.check_out:
+                    # Attendance treo quá 12h → auto close
+                    if punch_time - last_attendance.check_in > timedelta(hours=12):
+                        last_attendance.write({
+                            'check_out': last_attendance.check_in + timedelta(hours=8)
+                        })
+                    else:
+                        record.status = '2'  # ignore
+                        continue
+
+                Attendance.create({
+                    'employee_id': employee.id,
+                    'check_in': punch_time,
+                })
+                record.status = '0'
+
+            # ===== CHECK OUT =====
+            elif record.status_number == '1':
+                if last_attendance and not last_attendance.check_out:
+                    if punch_time > last_attendance.check_in:
+                        last_attendance.write({'check_out': punch_time})
+                        record.status = '1'
+                    else:
+                        record.status = '2'
+                else:
+                    record.status = '2'
+
+            # ===== OTHER =====
+            else:
+                record.status = '2'
+
+        return records
+
+    # --------------------------------------------------
+    # UNLINK PROTECTION
+    # --------------------------------------------------
+
+    def unlink(self):
+        processed = self.filtered(lambda r: r.user_punch_calculated)
+        if processed:
+            raise UserError(_("You cannot delete processed attendance logs."))
+        return super().unlink()
+
+    # --------------------------------------------------
+    # COMPUTE WEEKDAY
+    # --------------------------------------------------
+
+    @api.depends('user_punch_time')
+    def _compute_weekday_name(self):
+        weekdays = [
+            "Thứ Hai", "Thứ Ba", "Thứ Tư",
+            "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"
+        ]
+        for rec in self:
+            rec.weekday_name = (
+                weekdays[rec.user_punch_time.weekday()]
+                if rec.user_punch_time else False
+            )
 
 
 # ======================================================
