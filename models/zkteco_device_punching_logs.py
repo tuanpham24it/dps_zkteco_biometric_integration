@@ -6,7 +6,7 @@
 ########################################################
 
 from odoo import api, fields, models, _
-from datetime import datetime
+from datetime import datetime, timedelta
 from odoo.exceptions import UserError, ValidationError
 from convertdate import islamic
 
@@ -14,6 +14,92 @@ from convertdate import islamic
 # ======================================================
 # ZKTeco Device Logs
 # ======================================================
+
+# class ZktecoDeviceLogs(models.Model):
+#     _name = 'zkteco.device.logs'
+#     _description = 'ZKTeco Device Logs'
+#     _order = 'user_punch_time desc'
+#     _rec_name = 'user_punch_time'
+
+#     status = fields.Selection(
+#         [('0', 'Check In'), ('1', 'Check Out'), ('2', 'Ignored')],
+#         string='Status',
+#         readonly=True
+#     )
+
+#     status_number = fields.Char(string="Raw Status")  # IN / OUT from device
+#     user_punch_time = fields.Datetime(required=True)
+#     device = fields.Char()
+#     user_punch_calculated = fields.Boolean(default=False)
+
+#     zketco_duser_id = fields.Many2one('zkteco.attendance.machine')
+#     employee_id = fields.Many2one(
+#         'hr.employee',
+#         related='zketco_duser_id.employee_id',
+#         store=True
+#     )
+
+#     company_id = fields.Many2one(
+#         'res.company',
+#         default=lambda self: self.env.company,
+#         readonly=True
+#     )
+
+#     # --------------------------------------------------
+#     # CREATE – SAFE, NO 422
+#     # --------------------------------------------------
+
+#     @api.model_create_multi
+#     def create(self, vals_list):
+#         records = super().create(vals_list)
+#         Attendance = self.env['hr.attendance']
+
+#         for log in records:
+#             if not log.employee_id or not log.user_punch_time:
+#                 continue
+
+#             last_att = Attendance.search([
+#                 ('employee_id', '=', log.employee_id.id)
+#             ], order='check_in desc', limit=1)
+
+#             # ===== CASE 1: CHECK IN =====
+#             if log.status_number == '0':
+#                 if last_att and not last_att.check_out:
+#                     # Attendance treo quá 16h → auto close
+#                     if log.user_punch_time - last_att.check_in > timedelta(hours=16):
+#                         last_att.write({
+#                             'check_out': last_att.check_in + timedelta(hours=8)
+#                         })
+#                     else:
+#                         log.status = '2'
+#                         continue
+
+#                 Attendance.create({
+#                     'employee_id': log.employee_id.id,
+#                     'check_in': log.user_punch_time,
+#                 })
+#                 log.status = '0'
+
+#             # ===== CASE 2: CHECK OUT =====
+#             elif log.status_number == '1':
+#                 if last_att and not last_att.check_out:
+#                     if log.user_punch_time > last_att.check_in:
+#                         last_att.write({'check_out': log.user_punch_time})
+#                         log.status = '1'
+#                 else:
+#                     log.status = '2'
+
+#             else:
+#                 log.status = '2'
+
+#         return records
+
+#     # --------------------------------------------------
+
+#     def unlink(self):
+#         if self.filtered('user_punch_calculated'):
+#             raise UserError(_("Cannot delete processed logs"))
+#         return super().unlink()
 
 class ZktecoDeviceLogs(models.Model):
     _name = 'zkteco.device.logs'
@@ -85,8 +171,7 @@ class ZktecoDeviceLogs(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         records = super().create(vals_list)
-
-        hr_attendance = self.env['hr.attendance']
+        Attendance = self.env['hr.attendance']
 
         for record in records:
             employee = record.employee_id
@@ -95,24 +180,44 @@ class ZktecoDeviceLogs(models.Model):
             if not employee or not punch_time:
                 continue
 
-            last_attendance = hr_attendance.search(
+            last_attendance = Attendance.search(
                 [('employee_id', '=', employee.id)],
                 order='check_in desc',
                 limit=1
             )
 
-            if not last_attendance or last_attendance.check_out:
-                hr_attendance.create({
+            # ===== CHECK IN =====
+            if record.status_number == '0':
+                if last_attendance and not last_attendance.check_out:
+                    # Attendance treo quá 12h → auto close
+                    if punch_time - last_attendance.check_in > timedelta(hours=12):
+                        last_attendance.write({
+                            'check_out': last_attendance.check_in + timedelta(hours=8)
+                        })
+                    else:
+                        record.status = '2'  # ignore
+                        continue
+
+                Attendance.create({
                     'employee_id': employee.id,
                     'check_in': punch_time,
                 })
-                record.status = '0'  # Check In
-            else:
-                if punch_time > last_attendance.check_in:
-                    last_attendance.write({'check_out': punch_time})
-                    record.status = '1'  # Check Out
+                record.status = '0'
+
+            # ===== CHECK OUT =====
+            elif record.status_number == '1':
+                if last_attendance and not last_attendance.check_out:
+                    if punch_time > last_attendance.check_in:
+                        last_attendance.write({'check_out': punch_time})
+                        record.status = '1'
+                    else:
+                        record.status = '2'
                 else:
-                    record.status = '2'  # Old punch
+                    record.status = '2'
+
+            # ===== OTHER =====
+            else:
+                record.status = '2'
 
         return records
 
