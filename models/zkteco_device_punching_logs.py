@@ -174,52 +174,36 @@ class ZktecoDeviceLogs(models.Model):
         Attendance = self.env['hr.attendance']
 
         for record in records:
-            employee = record.employee_id
             punch_time = record.user_punch_time
-
+            employee = record.zketco_duser_id.employee_id if record.zketco_duser_id else False
             if not employee or not punch_time:
                 continue
 
-            last_attendance = Attendance.search(
+            last_att = Attendance.search(
                 [('employee_id', '=', employee.id)],
                 order='check_in desc',
                 limit=1
             )
 
-            # ===== CHECK IN =====
-            if record.status_number == '0':
-                if last_attendance and not last_attendance.check_out:
-                    # Attendance treo quá 12h → auto close
-                    if punch_time - last_attendance.check_in > timedelta(hours=12):
-                        last_attendance.write({
-                            'check_out': last_attendance.check_in + timedelta(hours=8)
-                        })
-                    else:
-                        record.status = '2'  # ignore
-                        continue
+            # --- AUTO TOGGLE: nếu không có ca mở => IN, có ca mở => OUT
+            has_open = bool(last_att and not last_att.check_out)
 
+            if not has_open:
                 Attendance.create({
                     'employee_id': employee.id,
                     'check_in': punch_time,
                 })
-                record.status = '0'
-
-            # ===== CHECK OUT =====
-            elif record.status_number == '1':
-                if last_attendance and not last_attendance.check_out:
-                    if punch_time > last_attendance.check_in:
-                        last_attendance.write({'check_out': punch_time})
-                        record.status = '1'
-                    else:
-                        record.status = '2'
-                else:
-                    record.status = '2'
-
-            # ===== OTHER =====
+                record.status = '0'   # Check In
             else:
-                record.status = '2'
+                # đảm bảo out > in
+                if punch_time > last_att.check_in:
+                    last_att.write({'check_out': punch_time})
+                    record.status = '1'  # Check Out
+                else:
+                    record.status = '2'  # Punched/ignore
 
         return records
+
 
     # --------------------------------------------------
     # UNLINK PROTECTION
